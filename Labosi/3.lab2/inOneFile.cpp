@@ -1,52 +1,163 @@
-//
-// Created by hrvoje on 14. 01. 2021..
-//
-
-#include "core.h"
-#include "help.h"
+#include <cstdint>
+#include <ostream>
+#include <array>
 #include <cassert>
-#include <iostream>
-#include <iomanip>
 
-std::ostream& operator<<(std::ostream& os, const int(&field)[9][9])
+class CP_sudoku
 {
-    for(std::uint8_t row = 0; row < 9; ++row)
-    {
-        for(std::uint8_t col = 0; col < 9; ++col)
-        {
-            std::cout << std::setw(2) << field[row][col] << ", ";
-        }
-        std::cout << std::endl;
-    }
+public:
+    class SudokuField;
+    class FieldDomain;
+    class Domains;
 
-    return os;
+    class FieldDomain
+    {
+    public:
+        struct FieldDomainIter;
+
+        using FieldDomainContainer = std::array<int8_t, 9>;
+
+        FieldDomain();
+
+        int8_t& operator[](uint8_t index);
+        uint32_t Size() const;
+        void Reset();
+
+        FieldDomainIter begin();
+        FieldDomainIter end();
+
+        friend class CP_sudoku;
+
+        FieldDomainContainer m_domain;
+
+        struct FieldDomainIter
+        {
+            FieldDomainIter(FieldDomainContainer& domain_container, uint8_t index = 0);
+
+            FieldDomainIter& operator++();
+            uint8_t operator*();
+
+            friend bool operator==(const FieldDomainIter& iter1, const FieldDomainIter& iter2);
+            friend bool operator!=(const FieldDomainIter& iter1, const FieldDomainIter& iter2);
+        private:
+            void FindNextIndex();
+
+            uint8_t m_index;
+            FieldDomainContainer& m_domain_container;
+        };
+
+    };
+
+    class Domains
+    {
+    public:
+        struct DomainsIter
+        {
+            DomainsIter(FieldDomain (&domain)[9][9], int* (&values)[9][9], bool end = false);
+
+            DomainsIter& operator++();
+            std::pair<int8_t, int8_t> operator*();
+
+            friend bool operator==(const DomainsIter& iter1, const DomainsIter& iter2);
+            friend bool operator!=(const DomainsIter& iter1, const DomainsIter& iter2);
+        private:
+            void FindSmallestDomain();
+
+            FieldDomain (&m_domain)[9][9];
+            int* (&m_values)[9][9];
+            bool m_end;
+            std::pair<int8_t, int8_t> m_current_index;
+        };
+
+        FieldDomain& GetDomain(uint8_t row, uint8_t col);
+        const FieldDomain& GetDomain(uint8_t row, uint8_t col) const;
+        DomainsIter begin();
+        DomainsIter end();
+
+        friend class CP_sudoku::SudokuField;
+        friend class CP_sudoku;
+
+        friend std::ostream& operator<<(std::ostream& os, const Domains& domains);
+    private:
+        void InitFill(int(&init_values)[9][9]);
+        void LinkFieldValues(SudokuField& field);
+        FieldDomain m_domains[9][9];
+        int *m_values[9][9];
+    };
+
+    class SudokuField
+    {
+    public:
+        SudokuField() = default;
+        SudokuField(const SudokuField& other);
+
+        int GetFieldValue(uint8_t row, uint8_t col) const;
+        const FieldDomain& GetFieldDomain(uint8_t row, uint8_t col) const;
+
+        void SetFieldValue(uint8_t row, uint8_t col, uint8_t val);
+        void UnsetFieldValue(uint8_t row, uint8_t col);
+
+        int field[9][9];
+
+        friend class CP_sudoku;
+        friend std::ostream& operator<<(std::ostream& os, const SudokuField& field);
+    private:
+        void InitFill(int(&init_values)[9][9]);
+        void LinkFieldDomains(Domains& domains);
+
+        Domains* m_domains = nullptr;
+    };
+
+    friend std::ostream& operator<<(std::ostream& os, const int(&field)[9][9]);
+
+
+    template <std::size_t Rows, std::size_t Cols>
+    SudokuField *solve(int (&init_values)[Rows][Cols]);
+
+    int getBacktraceCalls() const;
+
+private:
+
+    bool SolveRecursive();
+    void InitFill(int(&init_values)[9][9]);
+
+    SudokuField m_field;
+    Domains m_domains;
+    mutable uint32_t m_num;
+};
+
+bool ColumnCondition(uint8_t row, uint8_t col, int8_t val, int(&field)[9][9]);
+void FillColumn(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+void UnfillColumn(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+
+bool RowCondition(uint8_t row, uint8_t col, int8_t val, int(&field)[9][9]);
+void FillRow(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+void UnfillRow(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+
+bool BoxCondition(uint8_t row, uint8_t col, int8_t val, int(&field)[9][9]);
+void FillBox(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+void UnfillBox(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains);
+
+template<std::size_t Rows, std::size_t Cols>
+CP_sudoku::SudokuField *CP_sudoku::solve(int (&init_values)[Rows][Cols])
+{
+    InitFill(init_values);
+    m_num = 0;
+
+    if(SolveRecursive())
+    {
+        SudokuField* newField = new CP_sudoku::SudokuField(m_field);
+        return newField;
+    }
+    else
+    {
+        return nullptr;
+    }
 }
 
-std::ostream& operator<<(std::ostream& os, const CP_sudoku::SudokuField& field)
+int CP_sudoku::getBacktraceCalls() const
 {
-    for(uint8_t row = 0; row < 9; ++row)
-    {
-        for(uint8_t col = 0; col < 9; ++col)
-        {
-            std::cout << std::setw(2) << field.GetFieldValue(row, col) << ", ";
-        }
-        std::cout << std::endl;
-    }
-
-    return os;
-}
-std::ostream& operator<<(std::ostream& os, const CP_sudoku::Domains& domains)
-{
-    for(std::uint8_t row = 0; row < 9; ++row)
-    {
-        for(std::uint8_t col = 0; col < 9; ++col)
-        {
-            std::cout << std::setw(2) << domains.GetDomain(row, col).Size() << ", ";
-        }
-        std::cout << std::endl;
-    }
-
-    return os;
+    return m_num;
 }
 
 void CP_sudoku::InitFill(int (&init_values)[9][9])
@@ -72,17 +183,14 @@ bool CP_sudoku::SolveRecursive()
         {
             if(currentDomain.Size() > max_size)
             {
-                std::cout << "Previous: " <<  max_size << " New: " << currentDomain.Size() << std::endl;
                 max_size = currentDomain.Size();
             }
             m_field.SetFieldValue(row, col, val);
-            //std::cout << "Row: " << (int)row << " Col: " << (int)col << " Val: " << (int)val << '\n' << m_field << '\n' << m_domains << std::endl;
             if(SolveRecursive())
             {
                 return true;
             }
             m_field.UnsetFieldValue(row, col);
-            //std::cout << "URow: " << (int)row << " UCol: " << (int)col << " Val: " << (int)val << '\n' << m_field << '\n' << m_domains << std::endl;
         }
         return false;
     }
@@ -106,7 +214,7 @@ CP_sudoku::FieldDomain::FieldDomainIter CP_sudoku::FieldDomain::end()
 }
 
 CP_sudoku::FieldDomain::FieldDomainIter::FieldDomainIter(CP_sudoku::FieldDomain::FieldDomainContainer &domain_container, uint8_t index)
-    : m_domain_container(domain_container), m_index(index)
+        : m_domain_container(domain_container), m_index(index)
 {
     FindNextIndex();
 }
@@ -148,7 +256,7 @@ uint32_t CP_sudoku::FieldDomain::Size() const
 }
 
 CP_sudoku::FieldDomain::FieldDomain()
-    : m_domain()
+        : m_domain()
 {
     m_domain.fill(0);
 }
@@ -159,7 +267,7 @@ void CP_sudoku::FieldDomain::Reset()
 }
 
 CP_sudoku::Domains::DomainsIter::DomainsIter(CP_sudoku::FieldDomain (&domain)[9][9], int* (&values)[9][9], bool end)
-    : m_domain(domain), m_values(values), m_end(end)
+        : m_domain(domain), m_values(values), m_end(end)
 {
     FindSmallestDomain();
 }
@@ -197,7 +305,7 @@ void CP_sudoku::Domains::DomainsIter::FindSmallestDomain()
             }
         }
     }
-BreakBothLoops:
+    BreakBothLoops:
 
     if(smallest == 10)
     {
@@ -332,7 +440,7 @@ void CP_sudoku::SudokuField::LinkFieldDomains(CP_sudoku::Domains &domains)
 }
 
 CP_sudoku::SudokuField::SudokuField(const CP_sudoku::SudokuField &other)
-    : field(), m_domains(nullptr)
+        : field(), m_domains(nullptr)
 {
     for(uint8_t row = 0; row < 9; ++row)
     {
@@ -343,7 +451,61 @@ CP_sudoku::SudokuField::SudokuField(const CP_sudoku::SudokuField &other)
     }
 }
 
-int CP_sudoku::getBacktraceCalls() const
+//
+// Created by hrvoje on 14. 01. 2021..
+//
+
+void FillColumn(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
 {
-    return m_num;
+    for(uint8_t i = 0; i < 9; ++i) {
+        domains.GetDomain(i, col)[val-1]++;
+    }
 }
+
+void UnfillColumn(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
+{
+    for(uint8_t i = 0; i < 9; ++i) {
+        domains.GetDomain(i, col)[val-1]--;
+    }
+}
+
+void FillRow(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
+{
+    for(uint8_t i = 0; i < 9; ++i) {
+        domains.GetDomain(row, i)[val-1]++;
+    }
+}
+
+void UnfillRow(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
+{
+    for(uint8_t i = 0; i < 9; ++i) {
+        domains.GetDomain(row, i)[val-1]--;
+    }
+}
+
+void FillBox(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
+{
+    uint8_t box_row = (row / 3), box_col = (col / 3);
+
+    for(uint8_t i = 0; i < 3; ++i)
+    {
+        for(uint8_t j = 0; j < 3; ++j)
+        {
+            domains.GetDomain(3*box_row + i, 3*box_col + j)[val-1]++;
+        }
+    }
+}
+
+void UnfillBox(uint8_t row, uint8_t col, int8_t val, CP_sudoku::Domains& domains)
+{
+    uint8_t box_row = (row / 3), box_col = (col / 3);
+
+    for(uint8_t i = 0; i < 3; ++i)
+    {
+        for(uint8_t j = 0; j < 3; ++j)
+        {
+            domains.GetDomain(3*box_row + i, 3*box_col + j)[val-1]--;
+        }
+    }
+}
+
